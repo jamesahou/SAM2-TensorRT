@@ -11,7 +11,7 @@ cd SAM2-TensorRT
 pip install -e .
 ```
 
-and download weights from original repo and also tensorrt versions from [here](coming soon) and place it in `tensorrt/`
+and download weights from original repo and also tensorrt versions from [here](https://drive.google.com/file/d/1ETZJ4FdPjl4uyfq5rZcdBpZPEb9N0zMa/view?usp=sharing) and place it in `tensorrt/`
 
 or you can TensorRT it yourself
 
