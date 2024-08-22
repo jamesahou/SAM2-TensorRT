@@ -11,7 +11,7 @@ cd SAM2-TensorRT
 pip install -e .
 ```
 
-and download weights from original repo and also tensorrt versions from [here]() and place it in `tensorrt/`
+and download weights from original repo and also tensorrt versions from [here](coming soon) and place it in `tensorrt/`
 
 or you can TensorRT it yourself
 
@@ -24,7 +24,8 @@ trtexec --onnx=onnx/hiera_l_image_encoder.onnx --saveEngine=trt/hiera_l_image_en
 
 You may need to use the TensorRT docker to run the trtexec command and make sure your local TensorRT version is same as the one in the docker.
 
-Then use the sam2 library as you usually do (you can turn TensorRT on and off with use_trt in the configs).
+Then use the sam2 library as you usually do (you can turn TensorRT on and off with `use_trt` in the configs).
+
 -----
 # SAM 2: Segment Anything in Images and Videos
 
