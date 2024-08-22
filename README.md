@@ -1,3 +1,31 @@
+# SAM 2 TensorRT
+This is an adapted version of the original SAM 2 repo with TensorRT-accelerated weights - which should be faster (right now about ~14%). It has some scripts to export the important modules of the model (ImageEncoder, MemoryAttention, PromptEncoder, MaskDecoder) to ONNX and then to TensorRT.
+
+Thus far, the Image encoder has been implemented and the rest is a work in progress.
+
+To install, follow original SAM instructions:
+```bash
+git clone https://github.com/jamesahou/SAM2-TensorRT.git
+
+cd SAM2-TensorRT
+pip install -e .
+```
+
+and download weights from original repo and also tensorrt versions from [here]() and place it in `tensorrt/`
+
+or you can TensorRT it yourself
+
+```bash
+cd tensorrt
+python export_to_onnx.py
+
+trtexec --onnx=onnx/hiera_l_image_encoder.onnx --saveEngine=trt/hiera_l_image_encoder.trt --inputIOFormats=fp32:chw --outputIOFormats=bf16:chw --bf16
+```
+
+You may need to use the TensorRT docker to run the trtexec command and make sure your local TensorRT version is same as the one in the docker.
+
+Then use the sam2 library as you usually do (you can turn TensorRT on and off with use_trt in the configs).
+-----
 # SAM 2: Segment Anything in Images and Videos
 
 **[AI at Meta, FAIR](https://ai.meta.com/research/)**

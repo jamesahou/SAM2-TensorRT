@@ -101,4 +101,4 @@ if __name__ == "__main__":
 
     predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint, device=device)
 
-    export_model(predictor, "sam2_onnx")
+    export_model(predictor, "onnx")
