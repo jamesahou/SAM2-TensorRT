@@ -9,6 +9,10 @@ from typing import List, Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import tensorrt as trt
+from torch2trt import TRTModule
+import time
+import os
 
 
 class ImageEncoder(nn.Module):
@@ -26,9 +30,28 @@ class ImageEncoder(nn.Module):
             self.trunk.channel_list == self.neck.backbone_channel_list
         ), f"Channel dims of trunk and neck do not match. Trunk: {self.trunk.channel_list}, neck: {self.neck.backbone_channel_list}"
 
+    def _load_trunk(self):
+        del self.trunk
+        with trt.Logger() as logger, trt.Runtime(logger) as runtime:
+            with open(f"{os.environ['PWD']}/../tensorrt/trt/hiera_l_trunk.trt", 'rb') as f:
+                    engine_bytes = f.read()
+
+            engine = runtime.deserialize_cuda_engine(engine_bytes)
+            self.trunk = TRTModule(
+                engine,
+                input_names=["input.1"],
+                output_names= ["trunk_out_0", "trunk_out_1", "trunk_out_2", "trunk_out_3"],
+            )
+
     def forward(self, sample: torch.Tensor):
+        # torch.cuda.synchronize()
+        # tt = time.time()
+        trunk_out = self.trunk(sample)
+        
+        # torch.cuda.synchronize()
+        # print("Trunk Time", time.time() - tt)
         # Forward through backbone
-        features, pos = self.neck(self.trunk(sample))
+        features, pos = self.neck(trunk_out)
         if self.scalp > 0:
             # Discard the lowest resolution features
             features, pos = features[: -self.scalp], pos[: -self.scalp]

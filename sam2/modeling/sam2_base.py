@@ -15,6 +15,12 @@ from sam2.modeling.sam.prompt_encoder import PromptEncoder
 from sam2.modeling.sam.transformer import TwoWayTransformer
 from sam2.modeling.sam2_utils import get_1d_sine_pe, MLP, select_closest_cond_frames
 
+from torch2trt import TRTModule
+import tensorrt as trt
+import time
+
+import os
+
 # a large negative value as a placeholder score for missing objects
 NO_OBJ_SCORE = -1024.0
 
@@ -91,11 +97,15 @@ class SAM2Base(torch.nn.Module):
         # extra arguments used to construct the SAM mask decoder; if not None, it should be a dict of kwargs to be passed into `MaskDecoder` class.
         sam_mask_decoder_extra_args=None,
         compile_image_encoder: bool = False,
+        use_trt: bool = False
     ):
         super().__init__()
 
         # Part 1: the image backbone
         self.image_encoder = image_encoder
+        self.use_trt = use_trt
+        print("USE TRT: ", self.use_trt)
+
         # Use level 0, 1, 2 for high-res setting, or just level 2 for the default setting
         self.use_high_res_features_in_sam = use_high_res_features_in_sam
         self.num_feature_levels = 3 if use_high_res_features_in_sam else 1
@@ -185,7 +195,7 @@ class SAM2Base(torch.nn.Module):
                 self.image_encoder.forward,
                 mode="max-autotune",
                 fullgraph=True,
-                dynamic=False,
+                dynamic=False
             )
 
     @property
@@ -247,6 +257,21 @@ class SAM2Base(torch.nn.Module):
             self.obj_ptr_tpos_proj = torch.nn.Linear(self.hidden_dim, self.mem_dim)
         else:
             self.obj_ptr_tpos_proj = torch.nn.Identity()
+
+    def load_image_encoder(self):
+        if self.use_trt:
+            del self.image_encoder
+            with trt.Logger() as logger, trt.Runtime(logger) as runtime:
+                with open(f"{os.environ['PWD']}/../tensorrt/trt/hiera_l_image_encoder.trt", 'rb') as f:
+                        engine_bytes = f.read()
+
+                engine = runtime.deserialize_cuda_engine(engine_bytes)
+                self.image_encoder_output_names = ["vision_features", "vision_pos_enc_0", "vision_pos_enc_1", "vision_pos_enc_2", "backbone_fpn_0", "backbone_fpn_1", "backbone_fpn_2"]
+                self.image_encoder = TRTModule(
+                    engine,
+                    input_names=["input.1"],
+                    output_names= self.image_encoder_output_names
+                )
 
     def _forward_sam_heads(
         self,
@@ -462,16 +487,34 @@ class SAM2Base(torch.nn.Module):
 
     def forward_image(self, img_batch: torch.Tensor):
         """Get the image feature on the input batch."""
-        backbone_out = self.image_encoder(img_batch)
-        if self.use_high_res_features_in_sam:
-            # precompute projected level 0 and level 1 features in SAM decoder
-            # to avoid running it again on every SAM click
-            backbone_out["backbone_fpn"][0] = self.sam_mask_decoder.conv_s0(
-                backbone_out["backbone_fpn"][0]
-            )
-            backbone_out["backbone_fpn"][1] = self.sam_mask_decoder.conv_s1(
-                backbone_out["backbone_fpn"][1]
-            )
+        # print("img_batch", img_batch.shape)
+        # print("image dtype", img_batch.dtype)
+        # torch.cuda.synchronize()
+        # tt = time.time()
+        if self.use_trt:
+            trt_out = self.image_encoder(img_batch)
+            backbone_out = {"vision_features":trt_out[0], "vision_pos_enc":[trt_out[1], trt_out[2], trt_out[3],], "backbone_fpn":[trt_out[4], trt_out[5], trt_out[6],]}
+        else:
+            backbone_out = self.image_encoder(img_batch)
+            if self.use_high_res_features_in_sam:
+                # precompute projected level 0 and level 1 features in SAM decoder
+                # to avoid running it again on every SAM click
+                backbone_out["backbone_fpn"][0] = self.sam_mask_decoder.conv_s0(
+                    backbone_out["backbone_fpn"][0]
+                )
+                backbone_out["backbone_fpn"][1] = self.sam_mask_decoder.conv_s1(
+                    backbone_out["backbone_fpn"][1]
+                )
+        
+        # torch.cuda.synchronize()
+        # print("Image Encoder Time", time.time() - tt)
+        # print(backbone_out["vision_features"].dtype)
+        # print(backbone_out["vision_pos_enc"][0].dtype)
+        # print(backbone_out["vision_pos_enc"][1].dtype)
+        # print(backbone_out["vision_pos_enc"][2].dtype)
+        # print(backbone_out["backbone_fpn"][0].dtype)
+        # print(backbone_out["backbone_fpn"][1].dtype)
+        # print(backbone_out["backbone_fpn"][2].dtype)
         return backbone_out
 
     def _prepare_backbone_features(self, backbone_out):
@@ -649,6 +692,12 @@ class SAM2Base(torch.nn.Module):
         # Step 2: Concatenate the memories and forward through the transformer encoder
         memory = torch.cat(to_cat_memory, dim=0)
         memory_pos_embed = torch.cat(to_cat_memory_pos_embed, dim=0)
+
+        # print("current_vision_feats", current_vision_feats.shape)
+        # print("current_vision_pos_embeds", current_vision_pos_embeds.shape)
+        # print("memory", memory.shape)
+        # print("memory_pos_embed", memory_pos_embed.shape)
+        
 
         pix_feat_with_mem = self.memory_attention(
             curr=current_vision_feats,
